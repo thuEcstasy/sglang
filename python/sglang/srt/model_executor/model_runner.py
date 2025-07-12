@@ -88,6 +88,8 @@ from sglang.srt.mem_cache.memory_pool import (
     ReqToTokenPool,
     SWAKVPool,
 )
+
+from sglang.srt.mem_cache.vtx_memory_pool import VTXTokenToKVPool
 from sglang.srt.model_executor.cuda_graph_runner import CudaGraphRunner
 from sglang.srt.model_executor.forward_batch_info import ForwardBatch, PPProxyTensors
 from sglang.srt.model_loader import get_model
@@ -948,6 +950,14 @@ class ModelRunner:
                 * num_layers
                 * torch._utils._element_size(self.kv_cache_dtype)
             )
+        elif self.server_args.enable_vortex_sparsity:
+            cell_size = (
+                self.model_config.get_num_kv_heads(get_attention_tp_size())
+                * self.model_config.head_dim
+                * num_layers
+                * (2 + 1.0 / self.page_size)
+                * torch._utils._element_size(self.kv_cache_dtype)
+            )
         else:
             cell_size = (
                 self.model_config.get_num_kv_heads(get_attention_tp_size())
@@ -1029,9 +1039,9 @@ class ModelRunner:
                     ),
                     2048,
                 ),
-                4096,
+                4096 if not self.server_args.enable_vortex_sparsity else 256,
             )
-
+            
         if SGLANG_CI_SMALL_KV_SIZE:
             self.max_total_num_tokens = int(SGLANG_CI_SMALL_KV_SIZE)
 
@@ -1181,6 +1191,21 @@ class ModelRunner:
                     enable_kvcache_transpose=False,
                     device=self.device,
                 )
+            elif self.server_args.enable_vortex_sparsity:
+                self.token_to_kv_pool = VTXTokenToKVPool(
+                    self.max_total_num_tokens,
+                    page_size=self.page_size,
+                    dtype=self.kv_cache_dtype,
+                    head_num=self.model_config.get_num_kv_heads(
+                        get_attention_tp_size()
+                    ),
+                    head_dim=self.model_config.head_dim,
+                    layer_num=self.num_effective_layers,
+                    device=self.device,
+                    enable_memory_saver=self.server_args.enable_memory_saver,
+                    start_layer=self.start_layer,
+                    end_layer=self.end_layer,
+                )
             else:
                 self.token_to_kv_pool = MHATokenToKVPool(
                     self.max_total_num_tokens,
@@ -1258,7 +1283,13 @@ class ModelRunner:
     # TODO unify with 6338
     def _get_attention_backend(self):
         if self.server_args.attention_backend == "flashinfer":
-            if not self.use_mla_backend:
+            if self.server_args.enable_vortex_sparsity:
+                from sglang.srt.layers.attention.vtx_flashinfer_backend import (
+                    VTXFlashInferAttnBackend,
+                )
+                
+                return VTXFlashInferAttnBackend(self)
+            elif not self.use_mla_backend:
                 from sglang.srt.layers.attention.flashinfer_backend import (
                     FlashInferAttnBackend,
                 )

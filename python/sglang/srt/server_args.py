@@ -182,7 +182,16 @@ class ServerArgs:
     ds_heavy_token_num: int = 256
     ds_heavy_channel_type: str = "qk"
     ds_sparse_decode_threshold: int = 4096
-
+    
+    # Vortex Sparse Attention
+    enable_vortex_sparsity: bool = False
+    vortex_sparse_attention_algorithm: str = 'BLOCK_TOPK'
+    vortex_num_selected_pages: int = 32
+    vortex_layers_skip: Optional[List[int]] = None
+    vortex_page_reserved_bos: int = 1
+    vortex_page_reserved_eos: int = 1
+    
+    
     # Optimization/debug options
     disable_radix_cache: bool = False
     cuda_graph_max_bs: Optional[int] = None
