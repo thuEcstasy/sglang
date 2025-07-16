@@ -41,9 +41,14 @@ def main():
 
     sampling_params = {"temperature": 1e-7, "top_p": 0.95, "top_k": 20, "max_new_tokens": 128}
 
-    outputs = llm.generate(prompts, sampling_params)
+    o1 = llm.generate(prompts, sampling_params)
+    o2 = llm.generate(prompts, sampling_params)
+    
     with open("output.jsonl", "w", encoding="utf-8") as f:
-        for item in outputs:
+        for item in o1:
+            json.dump(item, f, ensure_ascii=False)
+            f.write("\n")
+        for item in o2:
             json.dump(item, f, ensure_ascii=False)
             f.write("\n")
 if __name__ == "__main__":
