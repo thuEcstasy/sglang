@@ -511,7 +511,7 @@ class FlashInferAttnBackend(AttentionBackend):
                     sm_scale=layer.scaling,
                     logits_soft_cap=logits_soft_cap,
                 )
-
+                
                 o, _ = merge_state(o1, s1, o2, s2)
 
             if save_kv_cache:

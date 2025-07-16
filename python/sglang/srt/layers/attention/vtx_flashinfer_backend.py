@@ -133,12 +133,12 @@ class VTXFlashInferAttnBackend(AttentionBackend):
         self.kv_indices = [
                 torch.zeros(
                     (
-                        (max_bs * self.num_kv_heads * model_runner.model_config.context_len + self.page_size - 1) // self.page_size,), 
+                        (max_bs * self.num_kv_heads * model_runner.model_config.context_len + self.page_size - 1),), 
                         dtype=torch.int32, device=model_runner.device
                 ),
                 torch.zeros(
                     (
-                        (max_bs * self.num_kv_heads * model_runner.model_config.context_len + self.page_size - 1) // self.page_size,), 
+                        (max_bs * self.num_kv_heads * model_runner.model_config.context_len + self.page_size - 1),), 
                         dtype=torch.int32, device=model_runner.device
                 ),
             ]
@@ -275,7 +275,7 @@ class VTXFlashInferAttnBackend(AttentionBackend):
                 req_to_token=self.req_to_token,
                 req_indices=forward_batch.req_pool_indices
             )
-           
+
             self.prefill_wrapper_ragged.plan(
                 self.qo_indptr[0][:bs+1],
                 self.qo_indptr[0][:bs+1],
@@ -297,9 +297,10 @@ class VTXFlashInferAttnBackend(AttentionBackend):
                 q_data_type=self.q_data_type,
                 kv_data_type=self.data_type,
                 custom_mask=None,
-                non_blocking=True,
+                non_blocking=False,
             )
             
+
             self.forward_metadata = PrefillMetadata(extend_no_prefix)
 
     def init_cuda_graph_state(
@@ -368,7 +369,6 @@ class VTXFlashInferAttnBackend(AttentionBackend):
             )
 
         else:
-            
             o1, s1 = self.prefill_wrapper_ragged.forward_return_lse(
                 q.view(-1, layer.tp_q_head_num, layer.head_dim),
                 k.view(-1, layer.tp_k_head_num, layer.head_dim),
@@ -378,11 +378,12 @@ class VTXFlashInferAttnBackend(AttentionBackend):
                 logits_soft_cap=logits_soft_cap,
                 )
             
-            
             q_t = self.vtx_api.chunkwise_NH2HN_transpose(
                 q.view(-1, self.num_qo_heads, self.head_dim),
                 self.qo_indptr[0]
             )
+            
+            
             
             o2, s2 = self.prefill_wrapper_paged.forward_return_lse(
                 q_t,
@@ -391,7 +392,6 @@ class VTXFlashInferAttnBackend(AttentionBackend):
                 sm_scale=layer.scaling,
                 logits_soft_cap=logits_soft_cap,
                 )
-
             o2_t, s2_t = self.vtx_api.chunkwise_HN2NH_transpose(
                 o2, s2, self.qo_indptr[0]
             )
