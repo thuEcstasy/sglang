@@ -113,7 +113,7 @@ class VTXFlashInferAttnBackend(AttentionBackend):
         self.head_dim = model_runner.model_config.head_dim
         self.data_type = model_runner.kv_cache_dtype
         self.q_data_type = model_runner.dtype
-        
+        self.count = 0
         assert self.q_data_type == torch.bfloat16
         assert self.data_type == torch.bfloat16
         
@@ -123,7 +123,7 @@ class VTXFlashInferAttnBackend(AttentionBackend):
         
         self.kv_indptr = [
                 torch.zeros(
-                    (max_bs + 1,), dtype=torch.int32, device=model_runner.device
+                    (max_bs * self.num_kv_heads + 1,), dtype=torch.int32, device=model_runner.device
                 ),
                 torch.zeros(
                     (max_bs * self.num_kv_heads + 1,), dtype=torch.int32, device=model_runner.device
@@ -222,16 +222,31 @@ class VTXFlashInferAttnBackend(AttentionBackend):
         if forward_batch.forward_mode.is_decode_or_idle():
             
             bs = len(forward_batch.req_pool_indices)
-            self.vtx_api.plan_decode(
-                cached_seq_lens=forward_batch.seq_lens.to(torch.int32),
-                dense_kv_indptr=self.kv_indptr[1][:bs*self.num_kv_heads+1],
-                dense_kv_indices=self.kv_indices[1],
-                sparse_kv_indptr=self.kv_indptr[0][:bs*self.num_kv_heads+1],
-                sparse_kv_indices=self.kv_indices[0],
-                kv_last_page_len=self.kv_last_page_len[1][:bs*self.num_kv_heads],
-                req_to_token=self.req_to_token,
-                req_indices=forward_batch.req_pool_indices
-            )
+            try:
+                self.vtx_api.plan_decode(
+                    cached_seq_lens=forward_batch.seq_lens.to(torch.int32),
+                    dense_kv_indptr=self.kv_indptr[1][:bs * self.num_kv_heads + 1],
+                    dense_kv_indices=self.kv_indices[1],
+                    sparse_kv_indptr=self.kv_indptr[0][:bs * self.num_kv_heads + 1],
+                    sparse_kv_indices=self.kv_indices[0],
+                    kv_last_page_len=self.kv_last_page_len[1][:bs * self.num_kv_heads],
+                    req_to_token=self.req_to_token,
+                    req_indices=forward_batch.req_pool_indices
+                )
+            except Exception as e:
+                print("Exception in plan_decode:")
+                print(f"bs: {bs}")
+                print(f"num_kv_heads: {self.num_kv_heads}")
+                print(f"dense_kv_indptr.shape: {self.kv_indptr[1].shape}")
+                print(f"sparse_kv_indptr.shape: {self.kv_indptr[0].shape}")
+                print(f"dense_kv_indptr used: {self.kv_indptr[1][:bs * self.num_kv_heads + 1].shape}")
+                print(f"sparse_kv_indptr used: {self.kv_indptr[0][:bs * self.num_kv_heads + 1].shape}")
+                print(f"kv_last_page_len.shape: {self.kv_last_page_len[1].shape}")
+                print(f"kv_last_page_len used: {self.kv_last_page_len[1][:bs * self.num_kv_heads].shape}")
+                print(f"req_to_token.shape: {self.req_to_token.shape}")
+                print(f"req_indices.shape: {forward_batch.req_pool_indices.shape}")
+                print(f"cached_seq_lens.shape: {forward_batch.seq_lens.shape}")
+                raise e
             
             self.decode_wrappers[0].plan(
                 indptr=self.kv_indptr[0][:bs*self.num_kv_heads+1],
@@ -432,8 +447,10 @@ class VTXFlashInferAttnBackend(AttentionBackend):
         v = v.view(-1, self.page_size, 1, self.head_dim)
         
         if use_sparsity:
+            #print(layer.layer_id)
             q_compress = q.contiguous().view(-1, self.num_attn_groups, layer.head_dim).sum(dim=-2)
             landmarks = forward_batch.token_to_kv_pool.get_landmark_buffer(layer.layer_id)
+            
             self.vtx_api.get_sparse_kv_indices(
                 query=q_compress,
                 landmarks=landmarks.view(-1, layer.head_dim),
@@ -442,8 +459,20 @@ class VTXFlashInferAttnBackend(AttentionBackend):
                 sparse_kv_indptr=self.kv_indptr[0],
                 sparse_kv_indices=self.kv_indices[0]
             )
+            #torch.cuda.synchronize()
+            
             
             self.decode_wrappers[0]._paged_kv_indices_buf = self.kv_indices[0]
+            #torch.cuda.synchronize()
+            # torch.set_printoptions(profile="full")
+            # print(self.decode_wrappers[0]._paged_kv_indptr_buf)
+            # print(self.decode_wrappers[1]._paged_kv_indptr_buf)
+            # print(self.kv_indices[1][:190344].topk(10))
+            # # print(self.kv_indices[0][:27200])
+            # # print(self.kv_indices[0][:27200].max())
+            # print(self.kv_indices[0][:27200].topk(10))
+            # print(k.shape)
+            # print(v.shape)
             o = self.decode_wrappers[0].forward(
                 q.contiguous().view(-1, self.num_attn_groups, layer.head_dim),
                 (k, v),
@@ -452,6 +481,16 @@ class VTXFlashInferAttnBackend(AttentionBackend):
                 k_scale=layer.k_scale,
                 v_scale=layer.v_scale,
             )
+            
+            #torch.cuda.synchronize()
+            # o = self.decode_wrappers[1].forward(
+            #     q.contiguous().view(-1, self.num_attn_groups, layer.head_dim),
+            #     (k, v),
+            #     sm_scale=layer.scaling,
+            #     logits_soft_cap=layer.logit_cap,
+            #     k_scale=layer.k_scale,
+            #     v_scale=layer.v_scale,
+            # )
         else:
             o = self.decode_wrappers[1].forward(
                 q.contiguous().view(-1, self.num_attn_groups, layer.head_dim),

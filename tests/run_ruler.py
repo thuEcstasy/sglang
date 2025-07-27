@@ -17,14 +17,14 @@ def main():
                     vortex_layers_skip=list(range(1))
                     )
     
-    with open('story.txt', "r", encoding="utf-8") as file:
-        content = file.read()
+    with open("validation.jsonl", "r", encoding="utf-8") as f:
+        ruler_data = [json.loads(line)["input"] for line in f]
     
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
     texts = [
-        [{"role":"user","content": content}],
+        [{"role":"user","content": x}] for x in ruler_data
     ]
     
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
     prompts = [
         tokenizer.apply_chat_template(
         text,
@@ -33,16 +33,13 @@ def main():
         enable_thinking=False
     ) for text in texts
     ]
-    
-    prompts = prompts * 4
-
-    sampling_params = {"temperature": 0.6, "top_p": 0.95, "top_k": 20, "max_new_tokens": 4096}
-    with open("output.jsonl", "w", encoding="utf-8") as f:
-        for _ in range(8):
+    sampling_params = {"temperature": 0.6, "top_p": 0.95, "top_k": 20, "max_new_tokens": 256}
+    with open("ruler_output.jsonl", "w", encoding="utf-8") as f:
             o = llm.generate(prompts, sampling_params)
             for item in o:
                     json.dump(item, f, ensure_ascii=False)
                     f.write("\n")
+    
 
 if __name__ == "__main__":
     main()
