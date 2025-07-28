@@ -7,6 +7,7 @@ FlashInfer is faster and Triton is easier to customize.
 Each backend supports two operators: extend (i.e. prefill with cached prefix) and decode.
 """
 
+from operator import truediv
 import os
 from dataclasses import dataclass
 from enum import Enum, auto
@@ -28,6 +29,7 @@ from sglang.srt.model_executor.forward_batch_info import ForwardBatch, ForwardMo
 from sglang.srt.speculative.eagle_utils import EagleDraftInput, EagleVerifyInput
 from sglang.srt.utils import is_flashinfer_available
 from sglang.srt.mem_cache.vtx_memory_pool import VTXTokenToKVPool
+from sglang.srt.mem_cache.vtx_memory_pool_manual import VTXTokenToKVPoolManual
 if TYPE_CHECKING:
     from sglang.srt.layers.radix_attention import RadixAttention
     from sglang.srt.model_executor.model_runner import ModelRunner
@@ -56,7 +58,7 @@ class PrefillMetadata:
 global_workspace_buffer = None
 
 
-class VTXFlashInferAttnBackend(AttentionBackend):
+class VTXFlashInferAttnBackendManual(AttentionBackend):
     """Flashinfer attention kernels."""
 
     def __init__(
@@ -350,7 +352,7 @@ class VTXFlashInferAttnBackend(AttentionBackend):
         save_kv_cache=True,
     ):
         
-        assert isinstance(forward_batch.token_to_kv_pool, VTXTokenToKVPool)
+        assert isinstance(forward_batch.token_to_kv_pool, VTXTokenToKVPoolManual)
         assert not layer.is_cross_attention
         cache_loc = forward_batch.out_cache_loc
         
@@ -415,7 +417,7 @@ class VTXFlashInferAttnBackend(AttentionBackend):
         forward_batch: ForwardBatch,
         save_kv_cache=True,
     ):  
-        assert isinstance(forward_batch.token_to_kv_pool, VTXTokenToKVPool)
+        assert isinstance(forward_batch.token_to_kv_pool, VTXTokenToKVPoolManual)
         assert not layer.is_cross_attention
         cache_loc = forward_batch.out_cache_loc
         
@@ -434,11 +436,6 @@ class VTXFlashInferAttnBackend(AttentionBackend):
         if use_sparsity:            
             q_compress = q.contiguous().view(-1, self.num_attn_groups, layer.head_dim).sum(dim=-2)
             landmarks = forward_batch.token_to_kv_pool.get_landmark_buffer(layer.layer_id)
-            # print("First landmark, first head:", flush=True)
-            # print(landmarks[8, 0, 0:10], flush=True)
-            # # print the first head, first page of k
-            # print("First head, first page of k:", flush=True)
-            # print(k[8, 0:16, 0, 0:10], flush=True)
             self.vtx_api.get_sparse_kv_indices(
                 query=q_compress,
                 landmarks=landmarks.view(-1, layer.head_dim),
@@ -465,17 +462,17 @@ class VTXFlashInferAttnBackend(AttentionBackend):
                 k_scale=layer.k_scale,
                 v_scale=layer.v_scale,
             )
-            import os
-            output_file = os.environ['MSE_FILE']
-            os.makedirs(os.path.dirname(output_file), exist_ok=True)
-            o_orig = o.view(-1, layer.tp_q_head_num * layer.head_dim)
-            o_dense_orig = o_dense.view(-1, layer.tp_q_head_num * layer.head_dim)
-            mse = torch.mean((o_orig - o_dense_orig) ** 2, dim=1)
-            denominator = torch.mean(o_dense_orig ** 2, dim=1)
+            
+            # compute MSE error between o and o_dense, using 4 digits after the decimal point
+            print(forward_batch.seq_lens, flush=True)
+            mse = torch.mean((o - o_dense) ** 2)
+            denominator = torch.mean(o_dense ** 2)
             rel_error = mse / denominator
-            with open(output_file, "a") as f:
-                for seq_len, rel_err in zip(forward_batch.seq_lens.tolist(), rel_error.tolist()):
-                    f.write(f"{seq_len}\t{rel_err:.10f}\n")
+            print(f"******", flush=True)
+            print(f"MSE error between o and o_dense: {mse.item():.10f}", flush=True)
+            print(f"Relative error between o and o_dense: {rel_error.item():.10f}", flush=True)
+            print(f"******", flush=True)
+            
         else:
             o = self.decode_wrappers[1].forward(
                 q.contiguous().view(-1, self.num_attn_groups, layer.head_dim),

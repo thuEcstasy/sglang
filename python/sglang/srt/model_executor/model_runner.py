@@ -90,6 +90,8 @@ from sglang.srt.mem_cache.memory_pool import (
 )
 
 from sglang.srt.mem_cache.vtx_memory_pool import VTXTokenToKVPool
+from sglang.srt.mem_cache.vtx_memory_pool_quest import VTXTokenToKVPoolQuest
+from sglang.srt.mem_cache.vtx_memory_pool_manual import VTXTokenToKVPoolManual
 from sglang.srt.model_executor.cuda_graph_runner import CudaGraphRunner
 from sglang.srt.model_executor.forward_batch_info import ForwardBatch, PPProxyTensors
 from sglang.srt.model_loader import get_model
@@ -232,6 +234,7 @@ class ModelRunner:
             deep_gemm_wrapper.update_deep_gemm_config(gpu_id, server_args)
 
         # If it is a draft model, tp_group can be different
+        print(f"min_per_gpu_memory: {min_per_gpu_memory}")
         self.initialize(min_per_gpu_memory)
 
         # temporary cached values
@@ -934,6 +937,7 @@ class ModelRunner:
             distributed=get_world_group().world_size > 1,
             cpu_group=get_world_group().cpu_group,
         )
+        print(f"available_gpu_memory: {available_gpu_memory}")
         if self.is_draft_worker:
             num_layers = getattr(
                 self.model_config.hf_config,
@@ -951,13 +955,33 @@ class ModelRunner:
                 * torch._utils._element_size(self.kv_cache_dtype)
             )
         elif self.server_args.enable_vortex_sparsity:
-            cell_size = (
-                self.model_config.get_num_kv_heads(get_attention_tp_size())
-                * self.model_config.head_dim
-                * num_layers
-                * (2 + 1.0 / self.page_size)
-                * torch._utils._element_size(self.kv_cache_dtype)
-            )
+            # for block topk, we need to reserve one landmark page for each block
+            if self.server_args.vortex_sparse_attention_algorithm == "BLOCK_TOPK":
+                cell_size = (
+                    self.model_config.get_num_kv_heads(get_attention_tp_size())
+                    * self.model_config.head_dim
+                    * num_layers
+                    * (2 + 1.0 / self.page_size)
+                    * torch._utils._element_size(self.kv_cache_dtype)
+                )
+            elif self.server_args.vortex_sparse_attention_algorithm == "QUEST":
+                cell_size = (
+                    self.model_config.get_num_kv_heads(get_attention_tp_size())
+                    * self.model_config.head_dim
+                    * num_layers
+                    * (2 + 2.0 / self.page_size)
+                    * torch._utils._element_size(self.kv_cache_dtype)
+                )
+            elif self.server_args.vortex_sparse_attention_algorithm == "MANUAL":
+                cell_size = (
+                    self.model_config.get_num_kv_heads(get_attention_tp_size())
+                    * self.model_config.head_dim
+                    * num_layers
+                    * (2 + 1.0 / self.page_size)
+                    * torch._utils._element_size(self.kv_cache_dtype)
+                )
+            else:
+                raise ValueError(f"Unsupported vortex sparse attention algorithm: {self.server_args.vortex_sparse_attention_algorithm}")
         else:
             cell_size = (
                 self.model_config.get_num_kv_heads(get_attention_tp_size())
@@ -1192,20 +1216,53 @@ class ModelRunner:
                     device=self.device,
                 )
             elif self.server_args.enable_vortex_sparsity:
-                self.token_to_kv_pool = VTXTokenToKVPool(
-                    self.max_total_num_tokens,
-                    page_size=self.page_size,
-                    dtype=self.kv_cache_dtype,
-                    head_num=self.model_config.get_num_kv_heads(
-                        get_attention_tp_size()
-                    ),
-                    head_dim=self.model_config.head_dim,
-                    layer_num=self.num_effective_layers,
-                    device=self.device,
-                    enable_memory_saver=self.server_args.enable_memory_saver,
-                    start_layer=self.start_layer,
-                    end_layer=self.end_layer,
-                )
+                if self.server_args.vortex_sparse_attention_algorithm == "BLOCK_TOPK":
+                    self.token_to_kv_pool = VTXTokenToKVPool(
+                        self.max_total_num_tokens,
+                        page_size=self.page_size,
+                        dtype=self.kv_cache_dtype,
+                        head_num=self.model_config.get_num_kv_heads(
+                            get_attention_tp_size()
+                        ),
+                        head_dim=self.model_config.head_dim,
+                        layer_num=self.num_effective_layers,
+                        device=self.device,
+                        enable_memory_saver=self.server_args.enable_memory_saver,
+                        start_layer=self.start_layer,
+                        end_layer=self.end_layer,
+                    )
+                elif self.server_args.vortex_sparse_attention_algorithm == "QUEST":
+                    self.token_to_kv_pool = VTXTokenToKVPoolQuest(
+                        self.max_total_num_tokens,
+                        page_size=self.page_size,
+                        dtype=self.kv_cache_dtype,
+                        head_num=self.model_config.get_num_kv_heads(
+                            get_attention_tp_size()
+                        ),
+                        head_dim=self.model_config.head_dim,
+                        layer_num=self.num_effective_layers,
+                        device=self.device,
+                        enable_memory_saver=self.server_args.enable_memory_saver,
+                        start_layer=self.start_layer,
+                        end_layer=self.end_layer,
+                    )
+                elif self.server_args.vortex_sparse_attention_algorithm == "MANUAL":
+                    self.token_to_kv_pool = VTXTokenToKVPoolManual(
+                        self.max_total_num_tokens,
+                        page_size=self.page_size,
+                        dtype=self.kv_cache_dtype,
+                        head_num=self.model_config.get_num_kv_heads(
+                            get_attention_tp_size()
+                        ),
+                        head_dim=self.model_config.head_dim,
+                        layer_num=self.num_effective_layers,
+                        device=self.device,
+                        enable_memory_saver=self.server_args.enable_memory_saver,
+                        start_layer=self.start_layer,
+                        end_layer=self.end_layer,
+                    )
+                else:
+                    raise ValueError(f"Unsupported vortex sparse attention algorithm: {self.server_args.vortex_sparse_attention_algorithm}")
             else:
                 self.token_to_kv_pool = MHATokenToKVPool(
                     self.max_total_num_tokens,
@@ -1284,11 +1341,26 @@ class ModelRunner:
     def _get_attention_backend(self):
         if self.server_args.attention_backend == "flashinfer":
             if self.server_args.enable_vortex_sparsity:
-                from sglang.srt.layers.attention.vtx_flashinfer_backend import (
-                    VTXFlashInferAttnBackend,
-                )
-                
-                return VTXFlashInferAttnBackend(self)
+                if self.server_args.vortex_sparse_attention_algorithm == "BLOCK_TOPK":
+                    from sglang.srt.layers.attention.vtx_flashinfer_backend import (
+                        VTXFlashInferAttnBackend,
+                    )
+                    
+                    return VTXFlashInferAttnBackend(self)
+                elif self.server_args.vortex_sparse_attention_algorithm == "QUEST":
+                    from sglang.srt.layers.attention.vtx_flashinfer_backend_quest import (
+                        VTXFlashInferAttnBackendQuest,
+                    )
+                    
+                    return VTXFlashInferAttnBackendQuest(self)
+                elif self.server_args.vortex_sparse_attention_algorithm == "MANUAL":
+                    from sglang.srt.layers.attention.vtx_flashinfer_backend_manual import (
+                        VTXFlashInferAttnBackendManual,
+                    )
+                    
+                    return VTXFlashInferAttnBackendManual(self)
+                else:
+                    raise ValueError(f"Unsupported vortex sparse attention algorithm: {self.server_args.vortex_sparse_attention_algorithm}")
             elif not self.use_mla_backend:
                 from sglang.srt.layers.attention.flashinfer_backend import (
                     FlashInferAttnBackend,

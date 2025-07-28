@@ -28,6 +28,7 @@ from sglang.srt.model_executor.forward_batch_info import ForwardBatch, ForwardMo
 from sglang.srt.speculative.eagle_utils import EagleDraftInput, EagleVerifyInput
 from sglang.srt.utils import is_flashinfer_available
 from sglang.srt.mem_cache.vtx_memory_pool import VTXTokenToKVPool
+from sglang.srt.mem_cache.vtx_memory_pool_quest import VTXTokenToKVPoolQuest
 if TYPE_CHECKING:
     from sglang.srt.layers.radix_attention import RadixAttention
     from sglang.srt.model_executor.model_runner import ModelRunner
@@ -56,7 +57,7 @@ class PrefillMetadata:
 global_workspace_buffer = None
 
 
-class VTXFlashInferAttnBackend(AttentionBackend):
+class VTXFlashInferAttnBackendQuest(AttentionBackend):
     """Flashinfer attention kernels."""
 
     def __init__(
@@ -350,7 +351,7 @@ class VTXFlashInferAttnBackend(AttentionBackend):
         save_kv_cache=True,
     ):
         
-        assert isinstance(forward_batch.token_to_kv_pool, VTXTokenToKVPool)
+        assert isinstance(forward_batch.token_to_kv_pool, VTXTokenToKVPoolQuest)
         assert not layer.is_cross_attention
         cache_loc = forward_batch.out_cache_loc
         
@@ -400,9 +401,9 @@ class VTXFlashInferAttnBackend(AttentionBackend):
 
 
         if save_kv_cache:
-                forward_batch.token_to_kv_pool.set_kv_buffer(
-                    layer, cache_loc, k, v, layer.k_scale, layer.v_scale
-                )
+            forward_batch.token_to_kv_pool.set_kv_buffer(
+                layer, cache_loc, k, v, layer.k_scale, layer.v_scale
+            )
 
         return o.view(-1, layer.tp_q_head_num * layer.head_dim)
 
@@ -415,7 +416,7 @@ class VTXFlashInferAttnBackend(AttentionBackend):
         forward_batch: ForwardBatch,
         save_kv_cache=True,
     ):  
-        assert isinstance(forward_batch.token_to_kv_pool, VTXTokenToKVPool)
+        assert isinstance(forward_batch.token_to_kv_pool, VTXTokenToKVPoolQuest)
         assert not layer.is_cross_attention
         cache_loc = forward_batch.out_cache_loc
         
@@ -431,17 +432,20 @@ class VTXFlashInferAttnBackend(AttentionBackend):
         k = k.view(-1, self.page_size, 1, self.head_dim)
         v = v.view(-1, self.page_size, 1, self.head_dim)
         
-        if use_sparsity:            
+        if use_sparsity:
             q_compress = q.contiguous().view(-1, self.num_attn_groups, layer.head_dim).sum(dim=-2)
             landmarks = forward_batch.token_to_kv_pool.get_landmark_buffer(layer.layer_id)
+            # print the first landmark, first head
+            # token index starts from 16
             # print("First landmark, first head:", flush=True)
             # print(landmarks[8, 0, 0:10], flush=True)
+            # print(landmarks[8, 1, 0:10], flush=True)
             # # print the first head, first page of k
             # print("First head, first page of k:", flush=True)
             # print(k[8, 0:16, 0, 0:10], flush=True)
             self.vtx_api.get_sparse_kv_indices(
                 query=q_compress,
-                landmarks=landmarks.view(-1, layer.head_dim),
+                landmarks=landmarks,
                 dense_kv_indptr=self.kv_indptr[1],
                 dense_kv_indices=self.kv_indices[1],
                 sparse_kv_indptr=self.kv_indptr[0],
@@ -476,6 +480,8 @@ class VTXFlashInferAttnBackend(AttentionBackend):
             with open(output_file, "a") as f:
                 for seq_len, rel_err in zip(forward_batch.seq_lens.tolist(), rel_error.tolist()):
                     f.write(f"{seq_len}\t{rel_err:.10f}\n")
+            
+            
         else:
             o = self.decode_wrappers[1].forward(
                 q.contiguous().view(-1, self.num_attn_groups, layer.head_dim),
