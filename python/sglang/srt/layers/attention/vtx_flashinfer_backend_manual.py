@@ -462,16 +462,18 @@ class VTXFlashInferAttnBackendManual(AttentionBackend):
                 k_scale=layer.k_scale,
                 v_scale=layer.v_scale,
             )
-            
+            v_output_dir = f"layer_{layer.layer_id}_dense"
+            o_manual = self.forward_manual(q, k, v, self.decode_wrappers[1]._paged_kv_indices_buf, self.decode_wrappers[1]._paged_kv_indptr_buf, self.decode_wrappers[0]._paged_kv_indices_buf, self.decode_wrappers[0]._paged_kv_indptr_buf, forward_batch.seq_lens, v_output_dir)
+            # print(o_dense.view(-1, layer.tp_q_head_num * layer.head_dim), o.view(-1, layer.tp_q_head_num * layer.head_dim), o_manual, flush=True)
             # compute MSE error between o and o_dense, using 4 digits after the decimal point
             print(forward_batch.seq_lens, flush=True)
             mse = torch.mean((o - o_dense) ** 2)
             denominator = torch.mean(o_dense ** 2)
             rel_error = mse / denominator
-            print(f"******", flush=True)
-            print(f"MSE error between o and o_dense: {mse.item():.10f}", flush=True)
-            print(f"Relative error between o and o_dense: {rel_error.item():.10f}", flush=True)
-            print(f"******", flush=True)
+            # print(f"******", flush=True)
+            # print(f"MSE error between o and o_dense: {mse.item():.10f}", flush=True)
+            # print(f"Relative error between o and o_dense: {rel_error.item():.10f}", flush=True)
+            # print(f"******", flush=True)
             
         else:
             o = self.decode_wrappers[1].forward(
@@ -484,4 +486,115 @@ class VTXFlashInferAttnBackendManual(AttentionBackend):
             )
 
         return o.view(-1, layer.tp_q_head_num * layer.head_dim)
+    def forward_manual(
+        self,
+        q: torch.Tensor,         # [1, D]
+        k: torch.Tensor,         # [N, head_dim]
+        v: torch.Tensor,         # [N, head_dim]
+        indices: torch.Tensor,   # CSR index
+        indptr: torch.Tensor,     # CSR ptr
+        sparse_indices: torch.Tensor,  # CSR index for sparse KV
+        sparse_indptr: torch.Tensor,   # CSR ptr for sparse KV
+        seq_lens: torch.Tensor,  # [1]
+        v_output_dir: str,
+    ):
+        head_dim = v.shape[-1]
+        k = k.view(-1, head_dim)
+        v = v.view(-1, head_dim)
+        assert q.shape[0] == 1, "Only supports single-token decoding"
+        assert q.shape[1] == self.num_qo_heads * head_dim
+
+        # Reshape q -> [num_qo_heads, head_dim]
+        q = q.view(self.num_qo_heads, head_dim)
+
+        outputs = []
+
+        for kv_head_id in range(self.num_kv_heads):
+            start, end = indptr[kv_head_id], indptr[kv_head_id + 1]
+            page_indices = indices[start:end]  # [num_pages]
+    
+            token_indices = torch.cat([
+                torch.arange(p * self.page_size, (p + 1) * self.page_size, device=q.device)
+                for p in page_indices
+            ])  # [num_pages * page_size]
+            
+            sparse_start, sparse_end = sparse_indptr[kv_head_id], sparse_indptr[kv_head_id + 1]
+            sparse_page_indices = sparse_indices[sparse_start:sparse_end]  # [num_sparse
+            sparse_token_indices = torch.cat([
+                torch.arange(p * self.page_size, (p + 1) * self.page_size, device=q.device)
+                for p in sparse_page_indices
+            ])  # [num_sparse * page_size]
+
+            k_i = k[token_indices]  # [N_i, D]
+            v_i = v[token_indices]  # [N_i, D]
+    
+            if seq_lens.item() == 4000:
+                import time
+                timestamp = int(time.time() * 1000)  # 毫秒级时间戳
+                q_output_file = os.path.join(v_output_dir, f"q_head_{kv_head_id}_{timestamp}.pt")
+                k_output_file = os.path.join(v_output_dir, f"k_head_{kv_head_id}_{timestamp}.pt")
+                v_output_file = os.path.join(v_output_dir, f"v_head_{kv_head_id}_{timestamp}.pt")
+                # print all inner product if seq_len = 4000
+                if not os.path.exists(v_output_dir):
+                    os.makedirs(v_output_dir, exist_ok=True)
+                torch.save(q, q_output_file)
+                torch.save(k_i, k_output_file)
+                torch.save(v_i, v_output_file)
+            
+            token_indices_cpu = token_indices.cpu().tolist()
+            sparse_token_indices_cpu = set(sparse_token_indices.cpu().tolist())
+
+            # mask是长度N_i的bool列表，True表示对应token_indices的token是sparse的
+            mask_list = [idx in sparse_token_indices_cpu for idx in token_indices_cpu]
+
+            # 转成tensor，放回GPU设备
+            mask = torch.tensor(mask_list, dtype=torch.bool, device=token_indices.device)  # [N_i]
+    
+            start_q = kv_head_id * self.num_attn_groups
+            end_q = (kv_head_id + 1) * self.num_attn_groups
+            q_group = q[start_q:end_q]         # [num_attn_groups, D]
+            
+            q_group = q_group.to(torch.float64)
+            k_i = k_i.to(torch.float64)
+            v_i = v_i.to(torch.float64)
+            
+            attn_scores = torch.matmul(q_group, k_i.T) / (head_dim ** 0.5)   # [num_attn_groups, N_i]
+            attn_weights = torch.softmax(attn_scores, dim=-1)               # [num_attn_groups, N_i]
+            
+            mask_expanded = mask.unsqueeze(0).expand(attn_weights.shape[0], -1)  # [num_attn_groups, N_i]
+
+            sparse_attn_weights = torch.zeros_like(attn_weights)
+
+            sparse_attn_weights[mask_expanded] = attn_weights[mask_expanded]
+                
+            # compute the sum of attention weights for each group
+            sparse_attn_cumsum = torch.sum(sparse_attn_weights, dim=-1)  # [num_attn_groups]
+            dense_attn_cumsum = torch.sum(attn_weights, dim=-1)
+            
+            # compute the theoretical attn cumsum by selecting top-k tokens
+            # print(seq_lens, flush=True)
+            # print((3 + 16) * self.page_size + seq_lens % 16, flush=True)
+            
+            
+            topk = min((3 + 16) * self.page_size + seq_lens % 16 , attn_weights.shape[-1])  # or choose top-k manually
+            # print("Choosing", topk.item(), flush=True)
+            topk_mask = torch.zeros_like(attn_weights)
+            topk_scores, topk_indices = torch.topk(attn_weights, k=topk, dim=-1)
+            topk_mask.scatter_(dim=-1, index=topk_indices, value=1.0)
+            attn_weights_topk = attn_weights * topk_mask
+            topk_attn_cumsum = torch.sum(attn_weights_topk, dim=-1)
+            print(sparse_attn_cumsum, topk_attn_cumsum, flush=True)
+            
+            # print(attn_weights, flush=True)
+            o_i = torch.matmul(attn_weights, v_i)                           # [num_attn_groups, D]
+
+            o_i = o_i.to(torch.bfloat16)
+
+            outputs.append(o_i)
+
+        o = torch.cat(outputs, dim=0)
+        o = o.view(1, -1)
+        return o
+
+
 
