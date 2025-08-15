@@ -55,39 +55,21 @@ def main():
             inputs = [item["Problem"] for item in batch]
             # apply template: Please reason step by step, and put your final answer within \boxed{}
             inputs = [f"Please reason step by step, and put your final answer within \\boxed{{}}. {item}" for item in inputs]
-            if "Llama" in model_name:
-                sampling_params = {
-                    "temperature": 0.6,
-                    "top_p": 0.95,
-                    "top_k": 20,
-                    "max_new_tokens": 32768,
-                    "stop_token_ids": [tokenizer.eos_token_id, tokenizer.convert_tokens_to_ids("<|eot_id|>")]
-                } 
-                # we don't apply chat template in RULER for Llama, so we need to apply it here    
-                inputs = [tokenizer.apply_chat_template(
-                    [{'role': 'user', 'content': item}],
-                    tokenize=False,
-                ) for item in inputs]
-            else:
-                sampling_params = {
-                    "temperature": 0.6,
-                    "top_p": 0.95,
-                    "top_k": 20,
-                    "max_new_tokens": 32768
-                }    
-                inputs = [tokenizer.apply_chat_template(
-                    [{'role': 'user', 'content': item}],
-                    tokenize=False,
-                    add_generation_prompt=True,
-                    enable_thinking=True, # Switches between thinking and non-thinking modes. Default is True.
-                ) for item in inputs]
-                print(f"Inputs: {inputs[0]}")
-            from time import time
-            start_time = time()
+            sampling_params = {
+                "temperature": 0.6,
+                "top_p": 0.95,
+                "top_k": 20,
+                "max_new_tokens": 32768
+            }    
+            inputs = [tokenizer.apply_chat_template(
+                [{'role': 'user', 'content': item}],
+                tokenize=False,
+                add_generation_prompt=True,
+                enable_thinking=True, # Switches between thinking and non-thinking modes. Default is True.
+            ) for item in inputs]
+            print(f"Inputs: {inputs[0]}")
             predictions = llm.generate(inputs, sampling_params)
             # tokenize the prediction and print the length
-            end_time = time()
-            print(f"Time for batch {i//bs}: {end_time - start_time} seconds", flush=True)
             input_tokens = tokenizer.encode(inputs[0])
             pred_tokens = tokenizer.encode(predictions[0]["text"])
             print(len(input_tokens), len(pred_tokens), flush=True)

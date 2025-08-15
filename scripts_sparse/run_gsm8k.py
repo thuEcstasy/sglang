@@ -14,8 +14,6 @@ def parse_args():
     parser.add_argument("--model_name", type=str, required=True)
     parser.add_argument("--use_dense_kv", action="store_true")
     parser.add_argument("--num_pages", type=int, default=4096)
-    parser.add_argument("--start", type=int, default=0)
-    parser.add_argument("--end", type=int, default=10000)
     parser.add_argument("--algo", type=str, default="BLOCK_TOPK")
     return parser.parse_args()
 
@@ -25,7 +23,8 @@ def main():
     num_pages = args.num_pages
     if args.use_dense_kv:
         llm = sgl.Engine(model_path=model_name, 
-                    disable_cuda_graph=True, 
+                        disable_cuda_graph=True, 
+                        attention_backend="flashinfer",
         )
     else:
         llm = sgl.Engine(model_path=model_name, 
@@ -46,24 +45,23 @@ def main():
         ruler_data = [json.loads(line) for line in f]
     
     bs = 32768 // args.prompt_len
-    output_path = f"../output/{model_name}/aime_output_prompt_len_{args.prompt_len}_num_pages_{num_pages if not args.use_dense_kv else 'dense'}_{args.algo}.jsonl"
+    output_path = f"../output/{model_name}/gsm8k_output_prompt_len_{args.prompt_len}_num_pages_{num_pages if not args.use_dense_kv else 'dense'}_{args.algo}.jsonl"
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     print(f"Output path: {output_path}")
-    with open(output_path, "a", encoding="utf-8") as fout:
-        start = args.start
-        end = args.end
-        bs = end - start
-        for i in tqdm(range(start, end, bs)):
+    with open(output_path, "w", encoding="utf-8") as fout:
+        for i in tqdm(range(0, len(ruler_data), bs)):
+
             batch = ruler_data[i:i+bs]
             inputs = [item["question"] for item in batch]
-            # apply template: Solve the math problem step by step and output the final answer with \\boxed{}.
-            inputs = [f"Please reason step by step, and put your final answer within \\boxed{{}}. {item}" for item in inputs]
+            # apply template: Please reason step by step, and put your final answer within \boxed{}
+            if "Qwen2-1.5B" not in model_name and "Qwen2.5-Math" not in model_name:
+                inputs = [f"Please reason step by step, and put your final answer within \\boxed{{}}. {item}" for item in inputs]
             if "Llama" in model_name:
                 sampling_params = {
                     "temperature": 0.6,
                     "top_p": 0.95,
                     "top_k": 20,
-                    "max_new_tokens": 4096,
+                    "max_new_tokens": 32768,
                     "stop_token_ids": [tokenizer.eos_token_id, tokenizer.convert_tokens_to_ids("<|eot_id|>")]
                 } 
                 # we don't apply chat template in RULER for Llama, so we need to apply it here    
@@ -76,13 +74,24 @@ def main():
                     "temperature": 0.6,
                     "top_p": 0.95,
                     "top_k": 20,
-                    "max_new_tokens": 4096
+                    "max_new_tokens": 3072
                 }    
+                inputs = [tokenizer.apply_chat_template(
+                    [{'role': 'user', 'content': item}],
+                    tokenize=False,
+                    add_generation_prompt=True,
+                    enable_thinking=True, # Switches between thinking and non-thinking modes. Default is True.
+                ) for item in inputs]
+                print(f"Inputs: {inputs[0]}")
+            from time import time
+            start_time = time()
             predictions = llm.generate(inputs, sampling_params)
             # tokenize the prediction and print the length
+            end_time = time()
+            print(f"Time for batch {i//bs}: {end_time - start_time} seconds", flush=True)
             input_tokens = tokenizer.encode(inputs[0])
             pred_tokens = tokenizer.encode(predictions[0]["text"])
-            print(len(input_tokens), len(pred_tokens))
+            print(len(input_tokens), len(pred_tokens), flush=True)
             for _ , (item, ruler_item, pred) in enumerate(zip(inputs, batch, predictions)):
                 output_item = {
                     "input": item,

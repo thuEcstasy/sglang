@@ -222,6 +222,7 @@ class VTXFlashInferAttnBackend(AttentionBackend):
         if forward_batch.forward_mode.is_decode_or_idle():
             
             bs = len(forward_batch.req_pool_indices)
+            # print("batch size:", bs, flush=True)
             try:
                 self.vtx_api.plan_decode(
                     cached_seq_lens=forward_batch.seq_lens.to(torch.int32),
@@ -461,6 +462,8 @@ class VTXFlashInferAttnBackend(AttentionBackend):
             
             
             self.decode_wrappers[0]._paged_kv_indices_buf = self.kv_indices[0]
+            # print("Indices:", self.kv_indices[0], flush=True)
+            # print("Indptr:", self.kv_indptr[0], flush=True)
             #torch.cuda.synchronize()
             # torch.set_printoptions(profile="full")
             # print(self.decode_wrappers[0]._paged_kv_indptr_buf)
@@ -479,25 +482,26 @@ class VTXFlashInferAttnBackend(AttentionBackend):
                 k_scale=layer.k_scale,
                 v_scale=layer.v_scale,
             )
-            o_dense = self.decode_wrappers[1].forward(
-                q.contiguous().view(-1, self.num_attn_groups, layer.head_dim),
-                (k, v),
-                sm_scale=layer.scaling,
-                logits_soft_cap=layer.logit_cap,
-                k_scale=layer.k_scale,
-                v_scale=layer.v_scale,
-            )
-            import os
-            output_file = os.environ['MSE_FILE']
-            os.makedirs(os.path.dirname(output_file), exist_ok=True)
-            o_orig = o.view(-1, layer.tp_q_head_num * layer.head_dim)
-            o_dense_orig = o_dense.view(-1, layer.tp_q_head_num * layer.head_dim)
-            mse = torch.mean((o_orig - o_dense_orig) ** 2, dim=1)
-            denominator = torch.mean(o_dense_orig ** 2, dim=1)
-            rel_error = mse / denominator
-            with open(output_file, "a") as f:
-                for seq_len, rel_err in zip(forward_batch.seq_lens.tolist(), rel_error.tolist()):
-                    f.write(f"{seq_len}\t{rel_err:.10f}\n")
+            # o_dense = self.decode_wrappers[1].forward(
+            #     q.contiguous().view(-1, self.num_attn_groups, layer.head_dim),
+            #     (k, v),
+            #     sm_scale=layer.scaling,
+            #     logits_soft_cap=layer.logit_cap,
+            #     k_scale=layer.k_scale,
+            #     v_scale=layer.v_scale,
+            # )
+            # import os
+            # output_file = os.environ['MSE_FILE']
+            # os.makedirs(os.path.dirname(output_file), exist_ok=True)
+            # o_orig = o.view(-1, layer.tp_q_head_num * layer.head_dim)
+            # o_dense_orig = o_dense.view(-1, layer.tp_q_head_num * layer.head_dim)
+            # mse = torch.mean((o_orig - o_dense_orig) ** 2, dim=1)
+            # denominator = torch.mean(o_dense_orig ** 2, dim=1)
+            # rel_error = mse / denominator
+            # print(f"Seq len: {forward_batch.seq_lens}, Relative error: {rel_error.mean().item():.10f}", flush=True) 
+            # with open(output_file, "a") as f:
+            #     for seq_len, rel_err in zip(forward_batch.seq_lens.tolist(), rel_error.tolist()):
+            #         f.write(f"{seq_len}\t{rel_err:.10f}\n")
         else:
             o = self.decode_wrappers[1].forward(
                 q.contiguous().view(-1, self.num_attn_groups, layer.head_dim),

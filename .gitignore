@@ -239,3 +239,5 @@ lmms-eval
 
 output/
 scripts_sparse/layer*
+
+scripts_sparse/profile.nsys-rep

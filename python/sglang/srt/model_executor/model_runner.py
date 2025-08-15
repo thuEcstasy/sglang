@@ -1599,7 +1599,19 @@ class ModelRunner:
                 pp_proxy_tensors=pp_proxy_tensors,
             )
         elif forward_batch.forward_mode.is_decode():
+            # import torch.profiler
+
+            # with torch.profiler.profile(
+            #     activities=[
+            #         torch.profiler.ProfilerActivity.CPU,
+            #         torch.profiler.ProfilerActivity.CUDA,
+            #     ],
+            #     record_shapes=True,
+            #     profile_memory=True,
+            #     with_stack=True
+            # ) as prof:
             ret = self.forward_decode(forward_batch, pp_proxy_tensors=pp_proxy_tensors)
+            # print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=10))
         elif forward_batch.forward_mode.is_extend():
             ret = self.forward_extend(
                 forward_batch,
