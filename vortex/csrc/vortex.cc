@@ -381,6 +381,10 @@ DecodeTopKKernelLauncher(
 
 }
 
+void SparseAttentionServer::set_num_selected_pages(int new_num) {
+    this->engine_config.num_selected_pages = new_num;
+}
+
 
 PYBIND11_MODULE(vortex_C, m) {
     py::class_<SparseAttentionServer>(m, "SparseAttentionServer")
@@ -432,6 +436,8 @@ PYBIND11_MODULE(vortex_C, m) {
          py::arg("dense_kv_indptr"),
          py::arg("dense_kv_indices"),
          py::arg("sparse_kv_indptr"),
-         py::arg("sparse_kv_indices"));
+         py::arg("sparse_kv_indices"))
+    .def("set_num_selected_pages", &SparseAttentionServer::set_num_selected_pages,
+         py::arg("new_num"));
 
 }

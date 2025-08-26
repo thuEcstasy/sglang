@@ -15,9 +15,10 @@ __global__ void PlanPrefillIndptrKernel(
     const int tx = threadIdx.x;
     using BlockScan = cub::BlockScan<int, 1024>;
     __shared__ typename BlockScan::TempStorage temp_storage;
+    
     int input_seq_cumsum = (tx < batch_size) ? input_seq_lens[tx] : 0;
     //int num_cached_pages = (cached_seq_lens[tx] + page_size - 1) / page_size;
-    int num_cached_pages = cached_seq_lens[tx];
+    int num_cached_pages = (tx < batch_size) ? cached_seq_lens[tx] : 0;
     int cached_seq_cumsum = (tx < batch_size) ? num_cached_pages : 0;
 
     BlockScan(temp_storage).InclusiveSum(input_seq_cumsum, input_seq_cumsum);
@@ -175,7 +176,7 @@ const int page_reserved_eos
 
     const int kv_budget = topk_val + page_reserved_bos + page_reserved_eos;
     const int tx = threadIdx.x;
-    const int cached_seq_len = cached_seq_lens[tx];
+    const int cached_seq_len = (tx < batch_size) ? cached_seq_lens[tx] : 0;
     const int cached_page_len = (cached_seq_len + page_size - 1) / page_size;
     using BlockScan = cub::BlockScan<int, 1024>;
     __shared__ typename BlockScan::TempStorage temp_storage;

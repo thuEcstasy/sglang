@@ -74,7 +74,7 @@ def main():
                     "temperature": 0.6,
                     "top_p": 0.95,
                     "top_k": 20,
-                    "max_new_tokens": 3072
+                    "max_new_tokens": 32768
                 }    
                 inputs = [tokenizer.apply_chat_template(
                     [{'role': 'user', 'content': item}],

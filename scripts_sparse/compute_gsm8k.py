@@ -6,7 +6,9 @@ json_file = "/home/haizhonz/Zhaofeng/sglang/output/home/haizhonz/Zhaofeng/verl/c
 json_file = "/home/haizhonz/Zhaofeng/sglang/output/home/haizhonz/Zhaofeng/verl/checkpoints/sparse-verl/Qwen2-1.5B-block-topk-sparse_rollout/global_step_200/gsm8k_output_prompt_len_4096_num_pages_16_BLOCK_TOPK.jsonl"
 json_file = "/home/haizhonz/Zhaofeng/sglang/output/home/haizhonz/Zhaofeng/verl/checkpoints/sparse-verl/Qwen2-1.5B-block-topk-sparse_rollout/global_step_200/gsm8k_output_prompt_len_4096_num_pages_dense_BLOCK_TOPK.jsonl"
 
-json_file = "/home/haizhonz/Zhaofeng/sglang/output/Qwen/Qwen2.5-Math-1.5B/gsm8k_output_prompt_len_4096_num_pages_dense_BLOCK_TOPK.jsonl"
+json_file = "/home/haizhonz/Zhaofeng/sglang/output/Qwen/Qwen2.5-Math-1.5B/gsm8k_output_prompt_len_4096_num_pages_6_BLOCK_TOPK.jsonl"
+# json_file = "/home/haizhonz/Zhaofeng/sglang/output/home/haizhonz/Zhaofeng/verl/checkpoints/sparse-verl/Qwen2-1.5B-block-topk-sparse_rollout/global_step_200/gsm8k_output_prompt_len_4096_num_pages_6_BLOCK_TOPK.jsonl"
+# json_file = "/home/haizhonz/Zhaofeng/sglang/output/home/haizhonz/Zhaofeng/verl/checkpoints/sparse-verl/Qwen2-1.5B-dense_rollout/global_step_200/gsm8k_output_prompt_len_4096_num_pages_6_BLOCK_TOPK.jsonl"
 
 def extract_last_boxed(s):
     numbers = re.findall(r'\d+(?:\.\d+)?', s)
@@ -35,7 +37,7 @@ with open(json_file, 'r') as f:
             correct += score == 100
             total += 1
         else:
-            print("Missing boxed answer in:", data)
+            # print("Missing boxed answer in:", data)
             score = 0
             all_scores.append(score)
             total += 1

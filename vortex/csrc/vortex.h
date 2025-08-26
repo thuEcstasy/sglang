@@ -287,6 +287,10 @@ class SparseAttentionServer{
                 at::Tensor req_to_token,
                 at::Tensor req_indices
             );
+            
+            void set_num_selected_pages(
+                int new_num
+            );
 
         private:
             ModelConfig model_config;
