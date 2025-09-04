@@ -199,6 +199,10 @@ class FlashInferAttnBackend(AttentionBackend):
         self.draft_extend_cuda_graph_metadata = {}  # For draft extend
 
     def init_forward_metadata(self, forward_batch: ForwardBatch):
+        if os.environ.get("TEST_E2E", "False") == "True":
+            torch.cuda.synchronize()
+            start_time = torch.cuda.Event(enable_timing=True)
+            start_time.record()
         if forward_batch.forward_mode.is_decode_or_idle():
             self.indices_updater_decode.update(
                 forward_batch.req_pool_indices,
@@ -260,7 +264,15 @@ class FlashInferAttnBackend(AttentionBackend):
             self.forward_metadata = PrefillMetadata(
                 self.prefill_wrappers_paged, use_ragged, extend_no_prefix
             )
-
+        if os.environ.get("TEST_E2E", "False") == "True":
+            end_time = torch.cuda.Event(enable_timing=True)
+            end_time.record()
+            torch.cuda.synchronize()
+            print(
+                f"Planning time: {start_time.elapsed_time(end_time)} ms, "
+                f"seq_lens: {forward_batch.seq_lens[0]}",
+                flush=True
+            )
     def init_cuda_graph_state(
         self,
         max_bs: int,
@@ -530,6 +542,11 @@ class FlashInferAttnBackend(AttentionBackend):
         forward_batch: ForwardBatch,
         save_kv_cache=True,
     ):
+
+        if os.environ.get("TEST_E2E", "False") == "True" and layer.layer_id == 3:
+            torch.cuda.synchronize()
+            start_time = torch.cuda.Event(enable_timing=True)
+            start_time.record()
         decode_wrapper = self.forward_metadata.decode_wrappers[
             self._get_wrapper_idx(layer)
         ]
@@ -556,6 +573,11 @@ class FlashInferAttnBackend(AttentionBackend):
             v_scale=layer.v_scale,
         )
 
+        if os.environ.get("TEST_E2E", "False") == "True" and layer.layer_id == 3:
+            end_time = torch.cuda.Event(enable_timing=True)
+            end_time.record()
+            torch.cuda.synchronize()
+            print(f"Layer {layer.layer_id} decode time: {start_time.elapsed_time(end_time)} ms, use dense, bs: {len(forward_batch.req_pool_indices)}, seq_lens: {forward_batch.seq_lens[0]}", flush=True)
         return o.view(-1, layer.tp_q_head_num * layer.head_dim)
 
     def _get_wrapper_idx(self, layer: RadixAttention):

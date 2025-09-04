@@ -9,7 +9,7 @@ import os
 
 def parse_args():
     parser = ArgumentParser()
-    parser.add_argument("--request_len", type=int, required=True)
+    parser.add_argument("--prompt_len", type=int, required=True)
     parser.add_argument("--dataset", type=str, required=True)
     parser.add_argument("--dataset_dir", type=str, required=True)
     parser.add_argument("--model_name", type=str, required=True)

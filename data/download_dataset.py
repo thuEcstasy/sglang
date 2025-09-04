@@ -3,26 +3,26 @@ import json
 
 # Login using e.g. `huggingface-cli login` to access this dataset
 
-ds = load_dataset("math-ai/minervamath")
+ds = load_dataset("agentica-org/DeepScaleR-Preview-Dataset")
 
 # save to local jsonl file
 for split in ds.keys():
-    with open(f"minervamath_{split}.jsonl", 'w', encoding='utf-8') as f:
+    with open(f"deepscaleR_{split}.jsonl", 'w', encoding='utf-8') as f:
         for item in ds[split]:
             f.write(json.dumps(item) + '\n')
             
-ds = load_dataset("math-ai/olympiadbench")
+# ds = load_dataset("math-ai/olympiadbench")
 
-# save to local jsonl file
-for split in ds.keys():
-    with open(f"olympiadbench_{split}.jsonl", 'w', encoding='utf-8') as f:
-        for item in ds[split]:
-            f.write(json.dumps(item) + '\n')
+# # save to local jsonl file
+# for split in ds.keys():
+#     with open(f"olympiadbench_{split}.jsonl", 'w', encoding='utf-8') as f:
+#         for item in ds[split]:
+#             f.write(json.dumps(item) + '\n')
             
-ds = load_dataset("HuggingFaceH4/MATH-500")
+# ds = load_dataset("HuggingFaceH4/MATH-500")
 
-# save to local jsonl file
-for split in ds.keys():
-    with open(f"math500_{split}.jsonl", 'w', encoding='utf-8') as f:
-        for item in ds[split]:
-            f.write(json.dumps(item) + '\n')
+# # save to local jsonl file
+# for split in ds.keys():
+#     with open(f"math500_{split}.jsonl", 'w', encoding='utf-8') as f:
+#         for item in ds[split]:
+#             f.write(json.dumps(item) + '\n')

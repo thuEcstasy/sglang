@@ -14,6 +14,8 @@ def main():
     output_path = "/home/haizhonz/Zhaofeng/sglang/output/home/haizhonz/Zhaofeng/verl/scripts/checkpoints/sparse-verl/Deepseek_r1_distill_1.5B-dense_rollout/global_step_120/actor/huggingface/math500_output_prompt_len_512_num_pages_dense_BLOCK_TOPK.jsonl"
     output_path = "/home/haizhonz/Zhaofeng/sglang/output/home/haizhonz/Zhaofeng/verl/scripts/checkpoints/sparse-verl/Deepseek_r1_distill_1.5B-block-topk-sparse_rollout/global_step_120/actor/huggingface/math500_output_prompt_len_512_num_pages_16_BLOCK_TOPK.jsonl"
     output_path = "/home/haizhonz/Zhaofeng/sglang/output/home/haizhonz/Zhaofeng/verl/scripts/checkpoints/sparse-verl/Deepseek_r1_distill_1.5B-block-topk-sparse_rollout/global_step_120/actor/huggingface/math500_output_prompt_len_512_num_pages_dense_BLOCK_TOPK.jsonl"
+    output_path = "/home/haizhonz/Zhaofeng/sglang/output/deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B/math500_output_prompt_len_512_num_pages_16_BLOCK_TOPK.jsonl"
+    output_path = "/home/haizhonz/Zhaofeng/sglang/output/deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B/math500_output_prompt_len_512_num_pages_dense_BLOCK_TOPK.jsonl"
     # evaluate
     with open(output_path, "r", encoding="utf-8") as f:
         results = [json.loads(line) for line in f]

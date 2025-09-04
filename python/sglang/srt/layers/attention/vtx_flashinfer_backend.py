@@ -129,7 +129,6 @@ class VTXFlashInferAttnBackend(AttentionBackend):
                     (max_bs * self.num_kv_heads + 1,), dtype=torch.int32, device=model_runner.device
                 ),
             ]
-        print(model_runner.model_config.context_len, flush=True)
         self.kv_indices = [
                 torch.zeros(
                     (
@@ -214,120 +213,58 @@ class VTXFlashInferAttnBackend(AttentionBackend):
         self.prefill_cuda_graph_metadata = {}  # For verify
         self.draft_extend_cuda_graph_metadata = {}  # For draft extend
 
-    def init_forward_metadata(self, forward_batch: ForwardBatch):
+    def init_forward_metadata(self, forward_batch: ForwardBatch): 
+        if os.environ.get("TEST_E2E", "False") == "True":
+            torch.cuda.synchronize()
+            start_time = torch.cuda.Event(enable_timing=True)
+            start_time.record()
         
         assert not forward_batch.forward_mode.is_draft_extend()
         assert not forward_batch.forward_mode.is_target_verify()
         
         if forward_batch.forward_mode.is_decode_or_idle():
             bs = len(forward_batch.req_pool_indices)
-            if forward_batch.seq_lens is not None:
-                self.debug_seq_lens = forward_batch.seq_lens.cpu().clone()
-            try:
-                # torch.cuda.synchronize()
-                # print(f"req_indices: {forward_batch.req_pool_indices}")
-                # for i in range(bs):
-                #     t_min = max(0, self.debug_seq_lens[i]-5)
-                #     t_max = min(self.debug_seq_lens[i]+5, self.req_to_token.shape[1])
-                #     print(f"t_min: {t_min}, t_max: {t_max}")
-                #     print(f"req_to_token: {self.req_to_token[forward_batch.req_pool_indices[i], t_min:t_max]}")
-                import os
-                use_dynamic_num_pages = int(os.environ.get("USE_DYNAMIC_NUM_PAGES", "0"))
-                if use_dynamic_num_pages == 1:
-                    torch.cuda.synchronize()
-                    num_pages = forward_batch.seq_lens[0].item() // (self.page_size * 10)
-                    num_pages = max(16, min(num_pages, 128))
-                    self.vtx_api.set_num_selected_pages(num_pages)
-                    torch.cuda.synchronize()
+            use_dynamic_num_pages = int(os.environ.get("USE_DYNAMIC_NUM_PAGES", "0"))
+            if use_dynamic_num_pages == 1:
+                num_pages = forward_batch.seq_lens[0].item() // (self.page_size * 10)
+                num_pages = max(16, min(num_pages, 128))
+                self.vtx_api.set_num_selected_pages(num_pages)
 
-                
-                self.vtx_api.plan_decode(
-                    cached_seq_lens=forward_batch.seq_lens.to(torch.int32),
-                    dense_kv_indptr=self.kv_indptr[1][:bs * self.num_kv_heads + 1],
-                    dense_kv_indices=self.kv_indices[1],
-                    sparse_kv_indptr=self.kv_indptr[0][:bs * self.num_kv_heads + 1],
-                    sparse_kv_indices=self.kv_indices[0],
-                    kv_last_page_len=self.kv_last_page_len[1][:bs * self.num_kv_heads],
-                    req_to_token=self.req_to_token,
-                    req_indices=forward_batch.req_pool_indices
+            self.vtx_api.plan_decode(
+                cached_seq_lens=forward_batch.seq_lens.to(torch.int32),
+                dense_kv_indptr=self.kv_indptr[1][:bs * self.num_kv_heads + 1],
+                dense_kv_indices=self.kv_indices[1],
+                sparse_kv_indptr=self.kv_indptr[0][:bs * self.num_kv_heads + 1],
+                sparse_kv_indices=self.kv_indices[0],
+                kv_last_page_len=self.kv_last_page_len[1][:bs * self.num_kv_heads],
+                req_to_token=self.req_to_token,
+                req_indices=forward_batch.req_pool_indices
                 )
-            except Exception as e:
-                print(f"bs: {bs}")
-                print(f"num_kv_heads: {self.num_kv_heads}")
-                print(f"dense_kv_indptr.shape: {self.kv_indptr[1].shape}")
-                print(f"sparse_kv_indptr.shape: {self.kv_indptr[0].shape}")
-                print(f"dense_kv_indptr used: {self.kv_indptr[1][:bs * self.num_kv_heads + 1].shape}")
-                print(f"sparse_kv_indptr used: {self.kv_indptr[0][:bs * self.num_kv_heads + 1].shape}")
-                print(f"kv_last_page_len.shape: {self.kv_last_page_len[1].shape}")
-                print(f"kv_last_page_len used: {self.kv_last_page_len[1][:bs * self.num_kv_heads].shape}")
-                print(f"req_to_token.shape: {self.req_to_token.shape}")
-                print(f"req_indices.shape: {forward_batch.req_pool_indices.shape}")
-                print(f"cached_seq_lens.shape: {forward_batch.seq_lens.shape}")
-            try:
-                torch.cuda.synchronize()
-                self.decode_wrappers[0].plan(
-                    indptr=self.kv_indptr[0][:bs*self.num_kv_heads+1],
-                    indices=self.kv_indices[0],
-                    last_page_len=self.kv_last_page_len[1][:bs*self.num_kv_heads],
-                    num_qo_heads=self.num_attn_groups,
-                    num_kv_heads=1,
-                    head_dim=self.head_dim,
-                    page_size=self.page_size,
-                    q_data_type=self.q_data_type,
-                    kv_data_type=self.data_type,
-                )
-            except Exception as e:
-                print(f"bs: {bs}")
-                print(f"num_kv_heads: {self.num_kv_heads}")
-                print(f"dense_kv_indptr.shape: {self.kv_indptr[1].shape}")
-                print(f"sparse_kv_indptr.shape: {self.kv_indptr[0].shape}")
-                print(f"dense_kv_indptr used: {self.kv_indptr[1][:bs * self.num_kv_heads + 1].shape}")
-                print(f"sparse_kv_indptr used: {self.kv_indptr[0][:bs * self.num_kv_heads + 1].shape}")
-                print(f"kv_last_page_len.shape: {self.kv_last_page_len[1].shape}")
-                print(f"kv_last_page_len used: {self.kv_last_page_len[1][:bs * self.num_kv_heads].shape}")
-                print(f"req_to_token.shape: {self.req_to_token.shape}")
-                print(f"req_indices.shape: {forward_batch.req_pool_indices.shape}")
-                print(f"cached_seq_lens.shape: {forward_batch.seq_lens.shape}")
-            try:
-                torch.cuda.synchronize()
-                self.decode_wrappers[1].plan(
-                    indptr=self.kv_indptr[1][:bs*self.num_kv_heads+1],
-                    indices=self.kv_indices[1],
-                    last_page_len=self.kv_last_page_len[1][:bs*self.num_kv_heads],
-                    num_qo_heads=self.num_attn_groups,
-                    num_kv_heads=1,
-                    head_dim=self.head_dim,
-                    page_size=self.page_size,
-                    q_data_type=self.q_data_type,
-                    kv_data_type=self.data_type,
-                )
-            except Exception as e:
-                print("Exception in plan_decode:")
-                print(f"bs: {bs}")
-                print(f"num_kv_heads: {self.num_kv_heads}")
-                print(f"dense_kv_indptr.shape: {self.kv_indptr[1].shape}")
-                print(f"sparse_kv_indptr.shape: {self.kv_indptr[0].shape}")
-                print(f"dense_kv_indptr used: {self.kv_indptr[1][:bs * self.num_kv_heads + 1].shape}")
-                print(f"sparse_kv_indptr used: {self.kv_indptr[0][:bs * self.num_kv_heads + 1].shape}")
-                print(f"kv_last_page_len.shape: {self.kv_last_page_len[1].shape}")
-                print(f"kv_last_page_len used: {self.kv_last_page_len[1][:bs * self.num_kv_heads].shape}")
-                print(f"req_to_token.shape: {self.req_to_token.shape}")
-                print(f"req_indices.shape: {forward_batch.req_pool_indices.shape}")
-                print(f"cached_seq_lens.shape: {forward_batch.seq_lens.shape}")
-                raise e
-            # print(f"bs: {bs}")
-            # print(f"num_kv_heads: {self.num_kv_heads}")
-            # print(f"dense_kv_indptr.shape: {self.kv_indptr[1].shape}")
-            # print(f"sparse_kv_indptr.shape: {self.kv_indptr[0].shape}")
-            # print(f"dense_kv_indptr used: {self.kv_indptr[1][:bs * self.num_kv_heads + 1].shape}")
-            # print(f"sparse_kv_indptr used: {self.kv_indptr[0][:bs * self.num_kv_heads + 1].shape}")
-            # print(f"kv_last_page_len.shape: {self.kv_last_page_len[1].shape}")
-            # print(f"kv_last_page_len used: {self.kv_last_page_len[1][:bs * self.num_kv_heads].shape}")
-            # print(f"req_to_token.shape: {self.req_to_token.shape}")
-            # print(f"req_to_token: {self.req_to_token[:bs, 0:10]}")
-            # print(f"req_to_token: {self.req_to_token[:bs, 1000:1010]}")
-            # print(f"req_indices.shape: {forward_batch.req_pool_indices.shape}")
-            # print(f"cached_seq_lens.shape: {forward_batch.seq_lens.shape}")
+            
+            self.decode_wrappers[0].plan(
+                indptr=self.kv_indptr[0][:bs*self.num_kv_heads+1],
+                indices=self.kv_indices[0],
+                last_page_len=self.kv_last_page_len[1][:bs*self.num_kv_heads],
+                num_qo_heads=self.num_attn_groups,
+                num_kv_heads=1,
+                head_dim=self.head_dim,
+                page_size=self.page_size,
+                q_data_type=self.q_data_type,
+                kv_data_type=self.data_type,
+            )
+
+            self.decode_wrappers[1].plan(
+                indptr=self.kv_indptr[1][:bs*self.num_kv_heads+1],
+                indices=self.kv_indices[1],
+                last_page_len=self.kv_last_page_len[1][:bs*self.num_kv_heads],
+                num_qo_heads=self.num_attn_groups,
+                num_kv_heads=1,
+                head_dim=self.head_dim,
+                page_size=self.page_size,
+                q_data_type=self.q_data_type,
+                kv_data_type=self.data_type,
+            )
+
             self.forward_metadata = DecodeMetadata(use_sparsity=True)
             
         
@@ -373,7 +310,15 @@ class VTXFlashInferAttnBackend(AttentionBackend):
             
 
             self.forward_metadata = PrefillMetadata(extend_no_prefix)
-
+        if os.environ.get("TEST_E2E", "False") == "True":
+            end_time = torch.cuda.Event(enable_timing=True)
+            end_time.record()
+            torch.cuda.synchronize()
+            print(
+                f"Planning time: {start_time.elapsed_time(end_time)} ms, "
+                f"seq_lens: {forward_batch.seq_lens[0]}",
+                flush=True
+            )
     def init_cuda_graph_state(
         self,
         max_bs: int,
@@ -486,6 +431,10 @@ class VTXFlashInferAttnBackend(AttentionBackend):
         forward_batch: ForwardBatch,
         save_kv_cache=True,
     ):  
+        if os.environ.get("TEST_E2E", "False") == "True" and layer.layer_id == 3:
+            torch.cuda.synchronize()
+            start_time = torch.cuda.Event(enable_timing=True)
+            start_time.record()
         assert isinstance(forward_batch.token_to_kv_pool, VTXTokenToKVPool)
         assert not layer.is_cross_attention
         cache_loc = forward_batch.out_cache_loc
@@ -566,6 +515,11 @@ class VTXFlashInferAttnBackend(AttentionBackend):
                 k_scale=layer.k_scale,
                 v_scale=layer.v_scale,
             )
+        if os.environ.get("TEST_E2E", "False") == "True" and layer.layer_id == 3:
+            end_time = torch.cuda.Event(enable_timing=True)
+            end_time.record()
+            torch.cuda.synchronize()
+            print(f"Layer {layer.layer_id} decode time: {start_time.elapsed_time(end_time)} ms, use_sparsity: {use_sparsity}, bs: {len(forward_batch.req_pool_indices)}, seq_lens: {forward_batch.seq_lens[0]}", flush=True)
 
         return o.view(-1, layer.tp_q_head_num * layer.head_dim)
 
