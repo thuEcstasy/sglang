@@ -47,14 +47,14 @@ def main():
         ruler_data = [json.loads(line) for line in f]
     
     bs = 32768 // args.prompt_len
-    output_path = f"../output/{model_name}/deepscaleR_output_prompt_len_{args.prompt_len}_num_pages_{num_pages if not args.use_dense_kv else 'dense'}_{args.algo}.jsonl"
+    output_path = f"../output/{model_name}/aime_output_prompt_len_{args.prompt_len}_num_pages_{num_pages if not args.use_dense_kv else 'dense'}_{args.algo}.jsonl"
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     print(f"Output path: {output_path}")
     with open(output_path, "w", encoding="utf-8") as fout:
         for i in tqdm(range(0, len(ruler_data), bs)):
 
             batch = ruler_data[i:i+bs]
-            inputs = [item["problem"] for item in batch]
+            inputs = [item["Problem"] for item in batch]
             # apply template: Please reason step by step, and put your final answer within \boxed{}
             # if "Qwen2-1.5B" not in model_name and "Qwen2.5-Math" not in model_name:
             #     inputs = [f"Please reason step by step, and put your final answer within \\boxed{{}}. {item}" for item in inputs]
@@ -65,7 +65,7 @@ def main():
                 # "temperature": 1,
                 # "top_p": 1,
                 # "top_k": -1,
-                "max_new_tokens": 32768
+                "max_new_tokens": 8192
             }
             inputs = [tokenizer.apply_chat_template(
                 [{'role': 'user', 'content': item}],
@@ -86,7 +86,7 @@ def main():
             for _ , (item, ruler_item, pred) in enumerate(zip(inputs, batch, predictions)):
                 output_item = {
                     "input": item,
-                    "gold_output": ruler_item["answer"],
+                    "gold_output": ruler_item["Answer"],
                     "pred_output": pred["text"]
                 }
                 json.dump(output_item, fout, ensure_ascii=False)
@@ -99,7 +99,7 @@ def main():
     correct = 0
     for res in results:
         pred = res["pred_output"]
-        gold = res["gold_output"]
+        gold = str(res["gold_output"])
         score = default_compute_score(
             data_source="HuggingFaceH4/MATH-500",
             solution_str=pred,

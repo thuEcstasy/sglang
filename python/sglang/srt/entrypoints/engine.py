@@ -250,6 +250,7 @@ class Engine(EngineBase):
         bootstrap_port: Optional[Union[List[int], int]] = None,
         bootstrap_room: Optional[Union[List[int], int]] = None,
         data_parallel_rank: Optional[int] = None,
+        validate: bool = False,
     ) -> Union[Dict, AsyncIterator[Dict]]:
         """
         The arguments of this function is the same as `sglang/srt/managers/io_struct.py::GenerateReqInput`.
@@ -265,8 +266,8 @@ class Engine(EngineBase):
                 raise ValueError(
                     f"data_parallel_rank must be in range [0, {self.server_args.dp_size-1}]"
                 )
-
         logger.info(f"data_parallel_rank: {data_parallel_rank}")
+        print("Is validation:", validate, flush=True)
         obj = GenerateReqInput(
             text=prompt,
             input_ids=input_ids,
@@ -284,6 +285,7 @@ class Engine(EngineBase):
             bootstrap_port=bootstrap_port,
             bootstrap_room=bootstrap_room,
             data_parallel_rank=data_parallel_rank,
+            validate=validate,
         )
         generator = self.tokenizer_manager.generate_request(obj, None)
 

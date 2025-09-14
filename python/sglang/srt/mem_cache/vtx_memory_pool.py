@@ -85,7 +85,6 @@ class VTXTokenToKVPool(KVCache):
         )
         
         self.mem_usage = (k_size + v_size + landmark_size) / GB
-
         assert self.dtype == torch.bfloat16
         assert self.store_dtype == torch.bfloat16
         

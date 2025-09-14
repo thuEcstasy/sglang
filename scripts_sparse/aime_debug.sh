@@ -1,13 +1,12 @@
-export CUDA_VISIBLE_DEVICES=1
 module load cuda12.4/toolkit/12.4.1
-PROMPT_LEN=32768
-MODEL_NAME="Qwen/Qwen3-1.7B"
+PROMPT_LEN=128
+MODEL_NAME="/home/haizhonz/Zhaofeng/checkpoints/huggingface_dense"
 DATASET_DIR="/home/haizhonz/Zhaofeng/sglang/data/aime24_train.jsonl"
 NUM_PAGES=32
 ALGO="BLOCK_TOPK"
 # Compute batch size
 BS=$((32768 / PROMPT_LEN))
-
+export TEST_E2E=True
 python run_aime.py \
     --prompt_len $PROMPT_LEN \
     --model_name $MODEL_NAME \

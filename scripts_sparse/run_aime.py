@@ -7,6 +7,9 @@ from argparse import ArgumentParser
 from tqdm import tqdm
 import os
 
+
+from verl.utils.reward_score import default_compute_score
+
 def parse_args():
     parser = ArgumentParser()
     parser.add_argument("--prompt_len", type=int, required=True)
@@ -73,7 +76,7 @@ def main():
                     "temperature": 0.6,
                     "top_p": 0.95,
                     "top_k": 20,
-                    "max_new_tokens": 32768
+                    "max_new_tokens": 8192
                 }    
                 inputs = [tokenizer.apply_chat_template(
                     [{'role': 'user', 'content': item}],
@@ -100,5 +103,28 @@ def main():
                 }
                 json.dump(output_item, fout, ensure_ascii=False)
                 fout.write("\n")
+                
+    # evaluate
+    with open(output_path, "r", encoding="utf-8") as f:
+        results = [json.loads(line) for line in f]
+    total = len(results)
+    correct = 0
+    for res in results:
+        pred = res["pred_output"]
+        gold = str(res["gold_output"])
+        score = default_compute_score(
+            data_source="HuggingFaceH4/MATH-500",
+            solution_str=pred,
+            ground_truth=gold,
+            extra_info=None,
+            sandbox_fusion_url=None,
+            concurrent_semaphore=None,
+            memory_limit_mb=None,
+        )
+        if isinstance(score, dict):
+            score = score.get("score", 0.0)
+        if score >= 1.0:
+            correct += 1
+    print(f"Total: {total}, Correct: {correct}, Accuracy: {correct/total:.4f}")
 if __name__ == "__main__":
     main()

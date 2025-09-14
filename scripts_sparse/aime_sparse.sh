@@ -1,5 +1,5 @@
 module load cuda12.4/toolkit/12.4.1
-PROMPT_LEN=512
+PROMPT_LEN=128
 MODEL_NAME="/home/haizhonz/Zhaofeng/checkpoints/huggingface"
 DATASET_DIR="/home/haizhonz/Zhaofeng/sglang/data/aime24_train.jsonl"
 NUM_PAGES=32
@@ -11,9 +11,4 @@ python run_aime.py \
     --prompt_len $PROMPT_LEN \
     --model_name $MODEL_NAME \
     --dataset_dir $DATASET_DIR \
-    --num_pages $NUM_PAGES \
-    --algo $ALGO
-
-
-
-
+    --use_dense_kv

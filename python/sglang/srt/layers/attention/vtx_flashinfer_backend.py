@@ -120,6 +120,7 @@ class VTXFlashInferAttnBackend(AttentionBackend):
         self.req_to_token = model_runner.req_to_token_pool.req_to_token
         self.page_size = model_runner.server_args.page_size
         self.layers_skip =  model_runner.server_args.vortex_layers_skip
+        self.num_pages = model_runner.server_args.vortex_num_selected_pages
         
         self.kv_indptr = [
                 torch.zeros(
@@ -229,7 +230,14 @@ class VTXFlashInferAttnBackend(AttentionBackend):
                 num_pages = forward_batch.seq_lens[0].item() // (self.page_size * 10)
                 num_pages = max(16, min(num_pages, 128))
                 self.vtx_api.set_num_selected_pages(num_pages)
-
+            is_validation = forward_batch.validate
+            # During validation, use dense attention
+            # print(is_validation, flush=True)
+            if is_validation == True:
+                self.vtx_api.set_num_selected_pages(2048)
+            else:
+                self.vtx_api.set_num_selected_pages(self.num_pages)
+                
             self.vtx_api.plan_decode(
                 cached_seq_lens=forward_batch.seq_lens.to(torch.int32),
                 dense_kv_indptr=self.kv_indptr[1][:bs * self.num_kv_heads + 1],

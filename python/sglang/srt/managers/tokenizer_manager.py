@@ -597,7 +597,6 @@ class TokenizerManager:
             session_params = (
                 SessionParams(**obj.session_params) if obj.session_params else None
             )
-
             tokenized_obj = TokenizedGenerateReqInput(
                 obj.rid,
                 input_text,
@@ -618,6 +617,7 @@ class TokenizerManager:
                 custom_logit_processor=obj.custom_logit_processor,
                 return_hidden_states=obj.return_hidden_states,
                 data_parallel_rank=obj.data_parallel_rank,
+                validate=obj.validate,
             )
         elif isinstance(obj, EmbeddingReqInput):
             tokenized_obj = TokenizedEmbeddingReqInput(

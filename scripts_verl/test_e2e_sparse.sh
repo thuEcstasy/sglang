@@ -1,7 +1,7 @@
 module load cuda12.4/toolkit/12.4.1
 PROMPT_LEN=128
-MODEL_NAME="Qwen/Qwen3-1.7B"
-DATASET_DIR="/home/haizhonz/Zhaofeng/sglang/data/deepscaleR_256.jsonl"
+MODEL_NAME="/home/haizhonz/Zhaofeng/checkpoints/TIS_GSPO1_clip3%_8k/huggingface"
+DATASET_DIR="/home/haizhonz/Zhaofeng/sglang/data/aime24_train_32.jsonl"
 NUM_PAGES=32
 ALGO="BLOCK_TOPK"
 # Compute batch size

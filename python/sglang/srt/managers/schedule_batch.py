@@ -439,6 +439,7 @@ class Req:
         bootstrap_port: Optional[int] = None,
         bootstrap_room: Optional[int] = None,
         data_parallel_rank: Optional[int] = None,
+        validate: bool = False,
     ):
         # Input and output info
         self.rid = rid
@@ -616,6 +617,8 @@ class Req:
         # We use `tmp_end_idx` to store the end index of the kv cache to send.
         self.tmp_end_idx: int = -1
         self.metadata_buffer_index: int = -1
+        
+        self.validate = validate
 
     @property
     def seqlen(self):
@@ -1748,6 +1751,7 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
             ),
             extend_input_logprob_token_ids=self.extend_input_logprob_token_ids,
             launch_done=self.launch_done,
+            validate=self.reqs[0].validate,
         )
 
     def copy(self):
@@ -1843,6 +1847,8 @@ class ModelWorkerBatch:
 
     # Overlap event
     launch_done: Optional[threading.Event] = None
+    
+    validate: bool = True
 
 
 @triton.jit
